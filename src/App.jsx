@@ -177,7 +177,6 @@ function LicenseExpiredScreen({ license, onRenew }) {
   );
 }
 
-export default 
 // ── BACKUP COMPONENT ─────────────────────────────────────────────────────────
 function BoutiqueBackup({ db, setDb, products, sales, showToast }) {
   const [confirmRestore, setConfirmRestore] = useState(null);
@@ -271,7 +270,7 @@ function BoutiqueBackup({ db, setDb, products, sales, showToast }) {
   );
 }
 
-function App() {
+export default function App() {
   const [license, setLicense] = useState(loadLicense);
   const [db, setDb] = useState(loadData);
   const [view, setView] = useState("inventory");
