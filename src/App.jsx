@@ -11,6 +11,71 @@ function isExpired(expiry) { if (!expiry) return true; return new Date(expiry) <
 function loadLicense() { try { const r = localStorage.getItem(LICENSE_KEY); if (r) return JSON.parse(r); } catch (_) {} return null; }
 function saveLicense(lic) { try { localStorage.setItem(LICENSE_KEY, JSON.stringify(lic)); } catch (_) {} }
 
+// ── INSTITUTION HELPERS (Update 5) ───────────────────────────────────────────
+function loadInstitution(key) {
+  try { return JSON.parse(localStorage.getItem(key + "_inst")) || { name: "", address: "" }; } catch { return { name: "", address: "" }; }
+}
+function saveInstitution(key, inst) {
+  try { localStorage.setItem(key + "_inst", JSON.stringify(inst)); } catch {}
+}
+
+
+// ── LICENCE EXPIRY BANNER (Update 8) ─────────────────────────────────────────
+function ExpiryBanner({ expiry, phone }) {
+  if (!expiry || expiry === "—") return null;
+  const days = Math.ceil((new Date(expiry) - new Date()) / 86400000);
+  if (days > 30) return null;
+  const bg  = days <= 7 ? "#dc2626" : "#d97706";
+  const msg = days <= 0
+    ? `Licence has expired — contact ${phone||"0597147460"} to renew`
+    : days <= 7
+      ? `⚠ Licence expires in ${days} day${days!==1?"s":""} — renew immediately`
+      : `Licence expires in ${days} day${days!==1?"s":""} — contact ${phone||"0597147460"} to renew`;
+  return (
+    <div style={{ background: bg, color: "#fff", textAlign: "center", padding: "7px 16px", fontSize: 12, fontWeight: 700, letterSpacing: 0.3 }}>
+      {msg}
+    </div>
+  );
+}
+
+
+// ── RESET MODAL (Update 1) ───────────────────────────────────────────────────
+function ResetModal({ onConfirm, onCancel, adminPin, accent, cardBg }) {
+  const [pin,  setPin]  = useState("");
+  const [err,  setErr]  = useState("");
+  const [step, setStep] = useState(1);
+  const check = () => { if (pin !== String(adminPin)) { setErr("Incorrect PIN."); return; } setStep(2); };
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:20 }}>
+      <div style={{ background: cardBg||"#1f2330", border:"1px solid #ef444455", borderRadius:14, padding:28, width:"min(94vw,400px)" }}>
+        {step === 1 ? (<>
+          <div style={{ fontSize:18, fontWeight:800, color:"#ef4444", marginBottom:8 }}>🔐 Admin PIN Required</div>
+          <p style={{ fontSize:13, color:"#94a3b8", marginBottom:16 }}>Enter your admin PIN to access the reset function.</p>
+          <input type="password" inputMode="numeric" maxLength={6} value={pin}
+            onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}}
+            onKeyDown={e=>e.key==="Enter"&&check()} placeholder="••••" autoFocus
+            style={{ width:"100%", padding:12, background:"rgba(255,255,255,0.06)", border:`1.5px solid ${err?"#ef4444":"rgba(255,255,255,0.15)"}`, borderRadius:8, color:"#fff", fontSize:20, textAlign:"center", letterSpacing:6, outline:"none", boxSizing:"border-box", marginBottom:8, fontFamily:"inherit" }} />
+          {err && <div style={{ color:"#fca5a5", fontSize:12, marginBottom:8 }}>{err}</div>}
+          <div style={{ display:"flex", gap:10, marginTop:8 }}>
+            <button onClick={onCancel} style={{ flex:1, padding:"10px 0", background:"transparent", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, color:"#94a3b8", fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+            <button onClick={check}    style={{ flex:1, padding:"10px 0", background:accent||"#2E86AB", color:"#fff", border:"none", borderRadius:8, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Verify PIN</button>
+          </div>
+        </>) : (<>
+          <div style={{ fontSize:18, fontWeight:800, color:"#ef4444", marginBottom:8 }}>⚠️ Confirm Full Reset</div>
+          <p style={{ fontSize:13, color:"#94a3b8", marginBottom:6, lineHeight:1.7 }}>This will <strong style={{ color:"#ef4444" }}>permanently delete ALL data</strong> in this app — records, settings, everything.</p>
+          <p style={{ fontSize:13, color:"#ef4444", fontWeight:700, marginBottom:20 }}>This cannot be undone.</p>
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={onCancel}  style={{ flex:1, padding:"10px 0", background:"transparent", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, color:"#94a3b8", fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+            <button onClick={onConfirm} style={{ flex:1, padding:"10px 0", background:"#dc2626", color:"#fff", border:"none", borderRadius:8, fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Delete All Data</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+
+
 const sampleProducts = [
   { id: "b1", name: "Ankara Wrap Dress", category: "Dresses", size: "M", color: "Multi", qty: 5, unit: "piece", costPrice: 120, sellPrice: 200, lowStockThreshold: 3, supplier: "Accra Fabric House", supplierPhone: "020-000-0031", lastRestocked: "2026-06-10" },
   { id: "b2", name: "Lace Blouse", category: "Tops", size: "L", color: "White", qty: 2, unit: "piece", costPrice: 75, sellPrice: 130, lowStockThreshold: 3, supplier: "Accra Fabric House", supplierPhone: "020-000-0031", lastRestocked: "2026-06-08" },
@@ -108,6 +173,8 @@ function LicenseScreen({ onActivate }) {
     const lic = { type: "licensed", key: k, expiry: expiry.toISOString(), issued: new Date().toISOString() };
     saveLicense(lic); onActivate(lic);
   };
+
+  const saveInst = (inst) => { setInstitution(inst); saveInstitution(LICENSE_KEY, inst); };
 
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${BRAND.color} 0%, #6b21a8 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
@@ -272,6 +339,8 @@ function BoutiqueBackup({ db, setDb, products, sales, showToast }) {
 
 export default function App() {
   const [license, setLicense] = useState(loadLicense);
+  const [institution, setInstitution] = useState(() => loadInstitution(LICENSE_KEY));
+  const [showReset, setShowReset] = useState(false);
   const [db, setDb] = useState(loadData);
   const [view, setView] = useState("inventory");
   const [search, setSearch] = useState("");
