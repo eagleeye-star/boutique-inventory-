@@ -34,6 +34,25 @@ function ExpiryBanner({ expiry, phone }) {
   return (
     <div style={{ background: bg, color: "#fff", textAlign: "center", padding: "7px 16px", fontSize: 12, fontWeight: 700, letterSpacing: 0.3 }}>
       {msg}
+
+      {showReset&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:20}}>
+          <div style={{background:"#fff",borderRadius:14,padding:28,width:"min(94vw,400px)",border:"1px solid #ef444444"}}>
+            <div style={{fontSize:18,fontWeight:800,color:"#ef4444",marginBottom:8}}>⚠️ Reset All Data</div>
+            <p style={{fontSize:13,color:"#6b7280",marginBottom:20,lineHeight:1.7}}>This permanently deletes ALL boutique data. Type <strong>RESET</strong> to confirm.</p>
+            <input id="boutique-reset-input" placeholder="Type RESET" style={{width:"100%",padding:11,border:"1px solid #e9d5ff",borderRadius:8,fontSize:14,outline:"none",boxSizing:"border-box",marginBottom:12,fontFamily:"inherit",textTransform:"uppercase"}} />
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowReset(false)} style={{flex:1,padding:"10px 0",background:"transparent",border:"1px solid #e9d5ff",borderRadius:8,color:"#6b7280",fontWeight:600,cursor:"pointer"}}>Cancel</button>
+              <button onClick={()=>{
+                if(document.getElementById("boutique-reset-input")?.value?.toUpperCase()==="RESET"){
+                  ["boutiqueInventory_v1_license","boutiqueInventory_v1_license_inst","boutique_setup"].forEach(k=>localStorage.removeItem(k));
+                  window.location.reload();
+                } else { alert("Please type RESET to confirm."); }
+              }} style={{flex:1,padding:"10px 0",background:"#dc2626",color:"#fff",border:"none",borderRadius:8,fontWeight:800,cursor:"pointer"}}>Delete All Data</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -44,7 +63,11 @@ function ResetModal({ onConfirm, onCancel, adminPin, accent, cardBg }) {
   const [pin,  setPin]  = useState("");
   const [err,  setErr]  = useState("");
   const [step, setStep] = useState(1);
-  const check = () => { if (pin !== String(adminPin)) { setErr("Incorrect PIN."); return; } setStep(2); };
+  const check = () => {
+    if (!adminPin) { setErr("No admin PIN set yet. Complete the setup wizard first."); return; }
+    if (pin !== String(adminPin)) { setErr("Incorrect PIN. Try again."); setPin(""); return; }
+    setStep(2);
+  };
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:20 }}>
       <div style={{ background: cardBg||"#1f2330", border:"1px solid #ef444455", borderRadius:14, padding:28, width:"min(94vw,400px)" }}>
