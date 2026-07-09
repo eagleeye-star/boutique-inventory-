@@ -2,15 +2,48 @@ import { useState, useEffect } from "react";
 
 const STORAGE_KEY = "wardrobeSelection_v1";
 const LICENSE_KEY = "wardrobeSelection_v1_license";
+const USERS_KEY = "wardrobeSelection_users";
+const SESSION_KEY = "wardrobeSelection_session";
 const TRIAL_DAYS = 14;
 const VALID_KEYS = ["TWS-DEMO-TRIAL-0001", "TWS-AIFARMS-VIP-002"];
 const BRAND = { color: "#7B2D42", light: "#F7E8EC", dark: "#4A1625" };
 const LOGO = "/logo.jpg";
 
+// ── UTILITY FUNCTIONS ────────────────────────────────────────────────────────
 function daysLeft(expiry) { if (!expiry) return 0; return Math.max(0, Math.ceil((new Date(expiry) - new Date()) / 86400000)); }
 function isExpired(expiry) { if (!expiry) return true; return new Date(expiry) < new Date(); }
 function loadLicense() { try { const r = localStorage.getItem(LICENSE_KEY); if (r) return JSON.parse(r); } catch (_) {} return null; }
 function saveLicense(lic) { try { localStorage.setItem(LICENSE_KEY, JSON.stringify(lic)); } catch (_) {} }
+function hashPassword(pwd) { let h = 0; for (let i = 0; i < pwd.length; i++) { h = ((h << 5) - h) + pwd.charCodeAt(i); h = h & h; } return Math.abs(h).toString(16); }
+function comparePassword(pwd, hash) { return hashPassword(pwd) === hash; }
+
+// ── USER MANAGEMENT ──────────────────────────────────────────────────────────
+function loadUsers() { try { const r = localStorage.getItem(USERS_KEY); if (r) return JSON.parse(r); } catch (_) {} return []; }
+function saveUsers(users) { try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch (_) {} }
+function loadSession() { try { const r = localStorage.getItem(SESSION_KEY); if (r) return JSON.parse(r); } catch (_) {} return null; }
+function saveSession(session) { try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (_) {} }
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} }
+
+// Initialize admin user if no users exist
+function initializeAdminIfNeeded() {
+  const users = loadUsers();
+  if (users.length === 0) {
+    const adminUser = {
+      id: "admin-" + Math.random().toString(36).slice(2, 9),
+      name: "Admin",
+      email: "admin@thewardrobe.com",
+      passwordHash: hashPassword("admin123"),
+      role: "admin",
+      sections: ["inventory", "sales", "alerts", "suppliers", "backup", "settings"],
+      createdAt: new Date().toISOString(),
+      createdBy: "system",
+      active: true
+    };
+    saveUsers([adminUser]);
+    return [adminUser];
+  }
+  return users;
+}
 
 const sampleProducts = [
   { id: "b1", name: "Ankara Wrap Dress", category: "Dresses", size: "M", color: "Multi", qty: 5, unit: "piece", costPrice: 120, sellPrice: 200, lowStockThreshold: 3, supplier: "Accra Fabric House", supplierPhone: "020-000-0031", lastRestocked: "2026-06-10" },
@@ -27,13 +60,7 @@ const sampleSales = [
   { id: "s3", productId: "b5", productName: "Silk Scarf", size: "One Size", color: "Red", qty: 3, sellPrice: 65, total: 195, date: "2026-06-24", note: "" },
 ];
 
-function loadData() {
-  try {
-    const r = localStorage.getItem(STORAGE_KEY);
-    if (r) return JSON.parse(r);
-  } catch (_) {}
-  return { products: sampleProducts, sales: sampleSales };
-}
+function loadData() { try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch (_) {} return { products: sampleProducts, sales: sampleSales }; }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (n) => `GH₵ ${Number(n).toFixed(2)}`;
@@ -41,6 +68,12 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const CATEGORIES = ["Dresses", "Tops", "Bottoms", "Skirts", "Outerwear", "Accessories", "Shoes", "Bags", "Other"];
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "One Size", "6", "8", "10", "12", "14", "36", "38", "40", "42"];
+const SECTION_PRESETS = {
+  inventory_manager: { label: "Inventory Manager", sections: ["inventory", "alerts", "suppliers"] },
+  sales_clerk: { label: "Sales Clerk", sections: ["sales", "inventory", "alerts"] },
+  supplier_manager: { label: "Supplier Manager", sections: ["suppliers", "alerts"] },
+  report_viewer: { label: "Report Viewer", sections: ["sales", "backup"] },
+};
 
 const iStyle = { width: "100%", padding: "8px 10px", border: "1.5px solid #E8C9D1", borderRadius: 8, fontSize: 14, boxSizing: "border-box", outline: "none", background: "#fff" };
 
@@ -81,6 +114,49 @@ function Row({ label, children }) {
   );
 }
 
+// ── LOGIN SCREEN ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+
+  const handleLogin = () => {
+    if (!email || !password) { setErr("Enter email and password."); return; }
+    const users = loadUsers();
+    const user = users.find(u => u.email === email && u.active);
+    if (!user) { setErr("User not found or inactive."); return; }
+    if (!comparePassword(password, user.passwordHash)) { setErr("Invalid password."); return; }
+    const session = { id: user.id, name: user.name, email: user.email, role: user.role, sections: user.sections };
+    saveSession(session);
+    onLogin(session);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${BRAND.color} 0%, #5C1A2B 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "min(94vw,420px)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <img src={LOGO} alt="The Wardrobe Selection" style={{ width: 64, height: 64, objectFit: "contain", marginBottom: 12, borderRadius: 10 }} />
+          <div style={{ fontSize: 20, fontWeight: 900, color: BRAND.dark, letterSpacing: -0.3 }}>The Wardrobe Selection</div>
+          <div style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>Employee Login</div>
+        </div>
+
+        <Row label="Email"><input style={iStyle} type="email" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="you@boutique.com" /></Row>
+        <Row label="Password"><input style={iStyle} type="password" value={password} onChange={e => { setPassword(e.target.value); setErr(""); }} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleLogin()} /></Row>
+        
+        {err && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 12, padding: "8px 10px", background: "#fee2e2", borderRadius: 6 }}>{err}</div>}
+        
+        <button onClick={handleLogin} style={{ width: "100%", padding: "13px 0", background: `linear-gradient(135deg, ${BRAND.color}, #5C1A2B)`, color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 14 }}>
+          Sign In
+        </button>
+
+        <div style={{ background: "#F7E8EC", borderRadius: 8, padding: 12, fontSize: 12, color: "#6b7280", lineHeight: 1.6, textAlign: "center" }}>
+          <strong>Demo Credentials:</strong><br/>Email: <code style={{ color: "#4A1625", fontWeight: 600 }}>admin@thewardrobe.com</code><br/>Password: <code style={{ color: "#4A1625", fontWeight: 600 }}>admin123</code>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── LICENSE SCREEN ───────────────────────────────────────────────────────────
 function LicenseScreen({ onActivate }) {
   const [mode, setMode] = useState("trial");
@@ -111,7 +187,7 @@ function LicenseScreen({ onActivate }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${BRAND.color} 0%, #4A1625 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${BRAND.color} 0%, #5C1A2B 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "min(94vw,420px)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ textAlign: "center", marginBottom: 22 }}>
           <img src={LOGO} alt="The Wardrobe Selection" style={{ width: 76, height: 76, objectFit: "contain", marginBottom: 8, borderRadius: 10 }} />
@@ -132,7 +208,7 @@ function LicenseScreen({ onActivate }) {
             <div style={{ background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: "#92400e" }}>
               Trial includes full access. Purchase a license before expiry to keep your data.
             </div>
-            <button onClick={startTrial} style={{ width: "100%", padding: "13px 0", background: `linear-gradient(135deg, ${BRAND.color}, ${BRAND.dark})`, color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+            <button onClick={startTrial} style={{ width: "100%", padding: "13px 0", background: `linear-gradient(135deg, ${BRAND.color}, #5C1A2B)`, color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
               Start Free Trial
             </button>
           </div>
@@ -145,7 +221,7 @@ function LicenseScreen({ onActivate }) {
               placeholder="TWS-XXXX-XXXX-XXXX"
               style={{ width: "100%", padding: 11, border: "2px solid #E8C9D1", borderRadius: 8, fontSize: 14, textAlign: "center", boxSizing: "border-box", letterSpacing: 2, marginBottom: 8, fontFamily: "monospace" }} />
             {err && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 8 }}>{err}</div>}
-            <button onClick={activateKey} style={{ width: "100%", padding: "13px 0", background: `linear-gradient(135deg, ${BRAND.color}, ${BRAND.dark})`, color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+            <button onClick={activateKey} style={{ width: "100%", padding: "13px 0", background: `linear-gradient(135deg, ${BRAND.color}, #5C1A2B)`, color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
               Activate
             </button>
             <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 12, textAlign: "center" }}>
@@ -178,8 +254,93 @@ function LicenseExpiredScreen({ license, onRenew }) {
   );
 }
 
+// ── USER MANAGEMENT MODAL (ADMIN ONLY) ────────────────────────────────────────
+function UserManagementModal({ users, onClose, onSave }) {
+  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "sales_clerk", preset: "sales_clerk" });
+  const [editingId, setEditingId] = useState(null);
+
+  const handleAddUser = () => {
+    if (!newUser.name || !newUser.email || !newUser.password) { alert("All fields required."); return; }
+    const exists = users.some(u => u.email === newUser.email);
+    if (exists) { alert("Email already in use."); return; }
+    const user = {
+      id: "user-" + uid(),
+      name: newUser.name,
+      email: newUser.email,
+      passwordHash: hashPassword(newUser.password),
+      role: newUser.preset,
+      sections: SECTION_PRESETS[newUser.preset]?.sections || [],
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      active: true
+    };
+    onSave([...users, user]);
+    setNewUser({ name: "", email: "", password: "", role: "sales_clerk", preset: "sales_clerk" });
+  };
+
+  const handleToggleUser = (id) => {
+    onSave(users.map(u => u.id === id ? { ...u, active: !u.active } : u));
+  };
+
+  const handleDeleteUser = (id) => {
+    if (window.confirm("Delete this user? This cannot be undone.")) {
+      onSave(users.filter(u => u.id !== id));
+    }
+  };
+
+  return (
+    <Modal title="👥 User Management" onClose={onClose}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: BRAND.dark, marginBottom: 12 }}>➕ Add New Employee</div>
+        <Row label="Full Name"><input style={iStyle} type="text" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="John Doe" /></Row>
+        <Row label="Email"><input style={iStyle} type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="john@example.com" /></Row>
+        <Row label="Password"><input style={iStyle} type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="••••••••" /></Row>
+        <Row label="Role / Access Level">
+          <select style={iStyle} value={newUser.preset} onChange={e => { setNewUser({ ...newUser, preset: e.target.value, role: e.target.value }); }}>
+            <option value="sales_clerk">Sales Clerk (Sales, Inventory, Alerts)</option>
+            <option value="inventory_manager">Inventory Manager (Inventory, Alerts, Suppliers)</option>
+            <option value="supplier_manager">Supplier Manager (Suppliers, Alerts)</option>
+            <option value="report_viewer">Report Viewer (Sales, Backup)</option>
+          </select>
+        </Row>
+        <button onClick={handleAddUser} style={{ width: "100%", background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+          + Add Employee
+        </button>
+      </div>
+
+      <div style={{ borderTop: "1px solid #E8C9D1", paddingTop: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: BRAND.dark, marginBottom: 12 }}>👤 Active Employees</div>
+        <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+          {users.filter(u => u.id !== "admin-" + (users[0]?.id || "")).length === 0 ? (
+            <p style={{ fontSize: 12, color: "#6b7280", margin: 0 }}>No employees added yet.</p>
+          ) : (
+            users.filter(u => u.role !== "admin").map(user => (
+              <div key={user.id} style={{ background: "#F7E8EC", borderRadius: 8, padding: 12, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: BRAND.dark }}>{user.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{user.email} • {SECTION_PRESETS[user.role]?.label || user.role}</div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>Sections: {user.sections.join(", ")}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
+                  <button onClick={() => handleToggleUser(user.id)} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", borderRadius: 5, background: user.active ? "#dcfce7" : "#fee2e2", color: user.active ? "#166534" : "#dc2626", cursor: "pointer" }}>
+                    {user.active ? "Active" : "Inactive"}
+                  </button>
+                  <button onClick={() => handleDeleteUser(user.id)} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", borderRadius: 5, background: "#fee2e2", color: "#dc2626", cursor: "pointer" }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function App() {
   const [license, setLicense] = useState(loadLicense);
+  const [currentUser, setCurrentUser] = useState(loadSession);
   const [db, setDb] = useState(loadData);
   const [view, setView] = useState("inventory");
   const [search, setSearch] = useState("");
@@ -188,32 +349,35 @@ export default function App() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [toast, setToast] = useState(null);
+  const [users, setUsers] = useState(() => initializeAdminIfNeeded());
+  const [confirmRestore, setConfirmRestore] = useState(null);
+  const [fileError, setFileError] = useState(null);
 
   useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); } catch (_) {} }, [db]);
 
+  // Gate: License check
   if (!license) return <LicenseScreen onActivate={setLicense} />;
   if (isExpired(license.expiry)) return <LicenseExpiredScreen license={license} onRenew={() => setLicense(null)} />;
 
+  // Gate: Login check
+  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+
+  // Gate: Section access check
+  const canAccess = (sectionId) => currentUser.sections.includes(sectionId) || currentUser.role === "admin";
+  const isAdmin = currentUser.role === "admin";
 
   const products = db.products;
   const sales = db.sales;
   const lowStock = products.filter(p => p.qty <= p.lowStockThreshold);
   const outOfStock = products.filter(p => p.qty === 0);
 
-  const showToast = (msg, type = "ok") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 2600);
-  };
-
+  const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2600); };
   const close = () => { setModal(null); setEditing(null); setForm({}); };
   const f = (key) => (e) => setForm(prev => ({ ...prev, [key]: e.target.value }));
 
   const cats = ["All", ...Array.from(new Set(products.map(p => p.category)))];
-
   const filtered = products.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.size?.toLowerCase().includes(search.toLowerCase()) ||
-      p.color?.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.size?.toLowerCase().includes(search.toLowerCase()) || p.color?.toLowerCase().includes(search.toLowerCase());
     const matchCat = filterCat === "All" || p.category === filterCat;
     return matchSearch && matchCat;
   });
@@ -287,7 +451,21 @@ export default function App() {
     { id: "alerts", label: `⚠️ Alerts${lowStock.length ? ` (${lowStock.length})` : ""}` },
     { id: "suppliers", label: "🚚 Suppliers" },
     { id: "backup", label: "💾 Backup" },
-  ];
+    ...(isAdmin ? [{ id: "settings", label: "⚙️ Settings" }] : []),
+  ].filter(item => canAccess(item.id));
+
+  const handleLogout = () => {
+    if (window.confirm("Logout from The Wardrobe Selection?")) {
+      clearSession();
+      setCurrentUser(null);
+    }
+  };
+
+  const handleUserSave = (updatedUsers) => {
+    saveUsers(updatedUsers);
+    setUsers(updatedUsers);
+    showToast("Users updated.");
+  };
 
   return (
     <div style={{ fontFamily: "'Inter','Segoe UI',sans-serif", background: "#FBF1F3", minHeight: "100vh", color: "#111827" }}>
@@ -298,12 +476,18 @@ export default function App() {
 
       {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #7B2D42 0%, #5C1A2B 100%)", padding: "22px 22px 0", color: "#fff" }}>
-        <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
-          <img src={LOGO} alt="The Wardrobe Selection" style={{ width: 42, height: 42, objectFit: "contain", borderRadius: 8, background: "#fff" }} />
-          <div>
-            <div style={{ fontSize: 11, opacity: 0.75, fontWeight: 600, letterSpacing: 1.5 }}>THE WARDROBE SELECTION</div>
-            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5 }}>Boutique Inventory</div>
-            {license.type === "trial" && <div style={{ fontSize: 11, marginTop: 4, background: "rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 8px", display: "inline-block" }}>Trial: {daysLeft(license.expiry)} days left</div>}
+        <div style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img src={LOGO} alt="The Wardrobe Selection" style={{ width: 42, height: 42, objectFit: "contain", borderRadius: 8, background: "#fff" }} />
+            <div>
+              <div style={{ fontSize: 11, opacity: 0.75, fontWeight: 600, letterSpacing: 1.5 }}>THE WARDROBE SELECTION</div>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5 }}>Boutique Inventory</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.85, textAlign: "right" }}>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>{currentUser.name}</div>
+            <div style={{ opacity: 0.7, fontSize: 11 }}>{SECTION_PRESETS[currentUser.role]?.label || currentUser.role}</div>
+            {license.type === "trial" && <div style={{ fontSize: 10, marginTop: 4, background: "rgba(255,255,255,0.2)", borderRadius: 4, padding: "2px 6px", display: "inline-block" }}>Trial: {daysLeft(license.expiry)}d</div>}
           </div>
         </div>
 
@@ -324,207 +508,185 @@ export default function App() {
         </div>
 
         {/* Nav */}
-        <div style={{ display: "flex", gap: 2, marginTop: 8 }}>
-          {navItems.map(n => (
-            <button key={n.id} onClick={() => setView(n.id)}
-              style={{ background: view === n.id ? "#fff" : "transparent", color: view === n.id ? BRAND.color : "rgba(255,255,255,0.85)", border: "none", borderRadius: "8px 8px 0 0", padding: "7px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-              {n.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 2, marginTop: 8, justifyContent: "space-between", alignItems: "flex-end" }}>
+          <div style={{ display: "flex", gap: 2 }}>
+            {navItems.map(n => (
+              <button key={n.id} onClick={() => setView(n.id)}
+                style={{ background: view === n.id ? "#fff" : "transparent", color: view === n.id ? BRAND.color : "rgba(255,255,255,0.85)", border: "none", borderRadius: "8px 8px 0 0", padding: "7px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                {n.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={handleLogout} style={{ background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", borderRadius: "8px 8px 0 0", padding: "7px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer", opacity: 0.8 }}>
+            Logout
+          </button>
         </div>
       </div>
 
       <div style={{ padding: "18px 22px", maxWidth: 1100, margin: "0 auto" }}>
 
         {/* INVENTORY */}
-        {view === "inventory" && (
-          <>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, size, color…" style={{ ...iStyle, maxWidth: 260, flex: 1 }} />
-              <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ ...iStyle, maxWidth: 160, width: "auto" }}>
-                {cats.map(c => <option key={c}>{c}</option>)}
-              </select>
-              <button onClick={() => { setForm({ category: "Dresses", size: "M" }); setModal("addProduct"); }}
-                style={{ background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Add Item</button>
-              <button onClick={() => { setForm({ productId: products[0]?.id, sellPrice: products[0]?.sellPrice, date: today() }); setModal("recordSale"); }}
-                style={{ background: "#fff", color: BRAND.color, border: `2px solid ${BRAND.color}`, borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🧾 Record Sale</button>
-            </div>
+        {view === "inventory" && (() => {
+          return (
+            <>
+              <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "center" }}>
+                <input style={iStyle} type="text" placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)} />
+                <select style={iStyle} value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+                  {cats.map(c => <option key={c}>{c}</option>)}
+                </select>
+                <button onClick={() => { setModal("addProduct"); setForm({}); setEditing(null); }} style={{ background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Add Item</button>
+              </div>
 
-            {/* Card grid view for boutique */}
-            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(200px,1fr))" }}>
-              {filtered.length === 0 && (
-                <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 36, color: "#9ca3af", fontSize: 14 }}>No items found. Add your first item above.</div>
-              )}
-              {filtered.map(p => {
-                const isLow = p.qty <= p.lowStockThreshold;
-                const isOut = p.qty === 0;
-                return (
-                  <div key={p.id} style={{
-                    background: "#fff", borderRadius: 14, padding: 16, boxShadow: "0 2px 8px rgba(147,51,234,0.08)",
-                    border: isOut ? "1.5px solid #fecaca" : isLow ? "1.5px solid #fde68a" : "1.5px solid #E8C9D1",
-                    position: "relative"
-                  }}>
-                    {isOut && <div style={{ position: "absolute", top: 10, right: 10 }}><Badge bg="#fef2f2" text="#ef4444">OUT</Badge></div>}
-                    {!isOut && isLow && <div style={{ position: "absolute", top: 10, right: 10 }}><Badge bg="#fffbeb" text="#d97706">LOW</Badge></div>}
-
+              {/* Card grid view for boutique */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+                {filtered.map(p => (
+                  <div key={p.id} style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #E8C9D1", overflow: "hidden" }}>
                     <div style={{ fontSize: 11, color: BRAND.color, fontWeight: 700, marginBottom: 4 }}>{p.category}</div>
-                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2, paddingRight: 40 }}>{p.name}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
-                      {p.size && <span style={{ marginRight: 8 }}>📏 {p.size}</span>}
-                      {p.color && <span>🎨 {p.color}</span>}
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 2, minHeight: "2.4em" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>{p.size} • {p.color}</div>
+                    <div style={{ marginBottom: 10 }}>
+                      <StockBar qty={p.qty} threshold={p.lowStockThreshold} />
+                      <div style={{ fontSize: 12, fontWeight: 600, color: BRAND.dark, marginTop: 4 }}>{p.qty} in stock</div>
                     </div>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
-                      <div>
-                        <div style={{ fontSize: 22, fontWeight: 900, color: isOut ? "#ef4444" : isLow ? "#f59e0b" : "#111" }}>{p.qty}</div>
-                        <div style={{ fontSize: 11, color: "#9ca3af" }}>in stock</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: BRAND.color }}>{fmt(p.sellPrice)}</div>
-                        <div style={{ fontSize: 11, color: "#9ca3af" }}>cost {fmt(p.costPrice)}</div>
-                      </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: BRAND.color }}>{fmt(p.sellPrice)}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>Cost: {fmt(p.costPrice)}</div>
                     </div>
-
-                    <StockBar qty={p.qty} threshold={p.lowStockThreshold} />
-
-                    <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                      <button onClick={() => { setEditing(p); setForm({ ...p }); setModal("restock"); }}
-                        style={{ flex: 1, background: "#F7E8EC", color: BRAND.color, border: "none", borderRadius: 7, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>+Stock</button>
-                      <button onClick={() => { setEditing(p); setForm({ ...p }); setModal("editProduct"); }}
-                        style={{ flex: 1, background: "#F7E8EC", color: BRAND.color, border: "none", borderRadius: 7, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Edit</button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {canAccess("alerts") && <button onClick={() => { setModal("restock"); setEditing(p); setForm({ addQty: "", supplier: p.supplier, supplierPhone: p.supplierPhone }); }} style={{ flex: 1, background: "#F7E8EC", color: BRAND.color, border: "none", borderRadius: 7, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>+Stock</button>}
+                      <button onClick={() => { setModal("editProduct"); setEditing(p); setForm(p); }} style={{ flex: 1, background: "#F7E8EC", color: BRAND.color, border: "none", borderRadius: 7, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Edit</button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </>
-        )}
+                ))}
+              </div>
+            </>
+          );
+        })()}
 
         {/* SALES */}
-        {view === "sales" && (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 17 }}>Sales History</div>
+        {view === "sales" && canAccess("sales") && (() => {
+          return (
+            <>
+              <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
                 <div style={{ fontSize: 13, color: "#6b7280" }}>Total revenue: <b style={{ color: BRAND.color }}>{fmt(totalSalesValue)}</b> · {sales.length} transactions</div>
+                <button onClick={() => { setModal("recordSale"); setForm({ date: today(), qty: 1 }); }} style={{ background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🧾 Record Sale</button>
               </div>
-              <button onClick={() => { setForm({ productId: products[0]?.id, sellPrice: products[0]?.sellPrice, date: today() }); setModal("recordSale"); }}
-                style={{ background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>🧾 Record Sale</button>
-            </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 8px rgba(147,51,234,0.08)" }}>
-                <thead>
-                  <tr style={{ background: "#F7E8EC" }}>
-                    {["Date", "Item", "Size", "Color", "Qty", "Price", "Total", "Note"].map(h => (
-                      <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: BRAND.dark }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sales.length === 0 && <tr><td colSpan={8} style={{ padding: 28, textAlign: "center", color: "#9ca3af" }}>No sales yet.</td></tr>}
-                  {[...sales].reverse().map((s, i) => (
-                    <tr key={s.id} style={{ borderTop: "1px solid #F7E8EC", background: i % 2 === 0 ? "#fff" : "#FBF1F3" }}>
-                      <td style={{ padding: "9px 12px", fontSize: 12, color: "#6b7280" }}>{s.date}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 600, fontSize: 13 }}>{s.productName}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 13 }}>{s.size || "—"}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 13 }}>{s.color || "—"}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 13 }}>{s.qty}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 13 }}>{fmt(s.sellPrice)}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 800, color: BRAND.color, fontSize: 13 }}>{fmt(s.total)}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 12, color: "#9ca3af" }}>{s.note || "—"}</td>
+
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E8C9D1", overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#F7E8EC" }}>
+                      {["Date", "Item", "Size/Color", "Qty", "Price", "Total", "Note"].map(h => (
+                        <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: BRAND.dark }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+                  </thead>
+                  <tbody>
+                    {sales.map((s, i) => (
+                      <tr key={s.id} style={{ borderTop: "1px solid #F7E8EC", background: i % 2 === 0 ? "#fff" : "#FBF1F3" }}>
+                        <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.date}</td>
+                        <td style={{ padding: "9px 12px", fontSize: 12, fontWeight: 600 }}>{s.productName}</td>
+                        <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.size}/{s.color}</td>
+                        <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.qty}</td>
+                        <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(s.sellPrice)}</td>
+                        <td style={{ padding: "9px 12px", fontWeight: 800, color: BRAND.color, fontSize: 13 }}>{fmt(s.total)}</td>
+                        <td style={{ padding: "9px 12px", fontSize: 12, color: "#6b7280" }}>{s.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })()}
 
         {/* ALERTS */}
-        {view === "alerts" && (
-          <>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>⚠️ Stock Alerts</div>
-            {lowStock.length === 0
-              ? <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: 12, padding: 24, color: "#166534", fontWeight: 600, textAlign: "center" }}>✅ All items are well stocked!</div>
-              : (
-                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(250px,1fr))" }}>
-                  {lowStock.map(p => (
-                    <div key={p.id} style={{ background: "#fff", borderRadius: 12, padding: 16, boxShadow: "0 2px 8px rgba(147,51,234,0.08)", borderLeft: `4px solid ${p.qty === 0 ? "#ef4444" : "#f59e0b"}` }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>{p.category} · Size {p.size} · {p.color}</div>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                        <div>
-                          <span style={{ fontSize: 26, fontWeight: 900, color: p.qty === 0 ? "#ef4444" : "#f59e0b" }}>{p.qty}</span>
-                          <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 3 }}>left</span>
-                        </div>
-                        <div style={{ textAlign: "right", fontSize: 11, color: "#6b7280" }}>
-                          <div>Alert at: {p.lowStockThreshold}</div>
-                          <div>{p.supplier || "No supplier"}</div>
-                        </div>
-                      </div>
-                      <button onClick={() => { setEditing(p); setForm({ ...p }); setModal("restock"); }}
-                        style={{ width: "100%", background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "7px 0", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Restock Now</button>
-                    </div>
-                  ))}
-                </div>
-              )
-            }
-          </>
-        )}
-
-        {/* SUPPLIERS */}
-        {view === "suppliers" && (
-          <>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>🚚 Suppliers</div>
-            {/* Group by supplier */}
-            {(() => {
-              const grouped = {};
-              products.filter(p => p.supplier).forEach(p => {
-                if (!grouped[p.supplier]) grouped[p.supplier] = { phone: p.supplierPhone, items: [] };
-                grouped[p.supplier].items.push(p);
-              });
-              return Object.entries(grouped).map(([name, data]) => (
-                <div key={name} style={{ background: "#fff", borderRadius: 12, padding: 18, marginBottom: 12, boxShadow: "0 2px 8px rgba(147,51,234,0.08)", border: "1px solid #E8C9D1" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 15 }}>🏢 {name}</div>
-                      <div style={{ fontSize: 13, color: "#6b7280" }}>📞 {data.phone || "—"}</div>
-                    </div>
-                    <Badge bg="#F7E8EC" text={BRAND.color}>{data.items.length} item{data.items.length !== 1 ? "s" : ""}</Badge>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {data.items.map(p => (
-                      <div key={p.id} style={{ background: "#FBF1F3", borderRadius: 8, padding: "6px 12px", fontSize: 12 }}>
-                        <span style={{ fontWeight: 600 }}>{p.name}</span>
-                        {p.size && <span style={{ color: "#6b7280" }}> · {p.size}</span>}
-                        <span style={{ marginLeft: 6 }}>
-                          <Badge bg={p.qty <= p.lowStockThreshold ? "#fffbeb" : "#f0fdf4"} text={p.qty <= p.lowStockThreshold ? "#d97706" : "#16a34a"}>{p.qty} left</Badge>
-                        </span>
+        {view === "alerts" && canAccess("alerts") && (() => {
+          return (
+            <div style={{ display: "grid", gap: 14 }}>
+              {lowStock.length > 0 && (
+                <div style={{ background: "#FEF3C7", borderRadius: 12, padding: 16, border: "1px solid #f59e0b" }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12, color: "#92400e" }}>⚠️ Low Stock Items ({lowStock.length})</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+                    {lowStock.map(p => (
+                      <div key={p.id} style={{ background: "#fff", borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>{p.qty} left · Threshold: {p.lowStockThreshold}</div>
+                        <button onClick={() => { setView("inventory"); setTimeout(() => { setModal("restock"); setEditing(p); setForm({ addQty: "", supplier: p.supplier, supplierPhone: p.supplierPhone }); }, 100); }} style={{ width: "100%", background: BRAND.color, color: "#fff", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Restock Now</button>
                       </div>
                     ))}
                   </div>
                 </div>
-              ));
-            })()}
-            {products.filter(p => p.supplier).length === 0 && <div style={{ color: "#9ca3af", textAlign: "center", padding: 28 }}>No supplier info yet.</div>}
-          </>
-        )}
+              )}
 
-        {view === "backup" && (() => {
-          const [confirmRestore, setConfirmRestore] = useState(null);
-          const [fileError, setFileError] = useState("");
-          const stats2 = [["Products", products.length], ["Sales", sales.length]];
+              {outOfStock.length > 0 && (
+                <div style={{ background: "#FEE2E2", borderRadius: 12, padding: 16, border: "1px solid #ef4444" }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12, color: "#991b1b" }}>🚨 Out of Stock ({outOfStock.length})</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+                    {outOfStock.map(p => (
+                      <div key={p.id} style={{ background: "#fff", borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>{p.supplier}</div>
+                        <button onClick={() => { setView("inventory"); setTimeout(() => { setModal("restock"); setEditing(p); setForm({ addQty: "", supplier: p.supplier, supplierPhone: p.supplierPhone }); }, 100); }} style={{ width: "100%", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Restock Urgently</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {lowStock.length === 0 && outOfStock.length === 0 && (
+                <div style={{ background: "#DCFCE7", borderRadius: 12, padding: 20, textAlign: "center", border: "1px solid #22c55e" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#166534" }}>✓ All stock levels healthy!</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* SUPPLIERS */}
+        {view === "suppliers" && canAccess("suppliers") && (() => {
+          const supplierData = Array.from(new Set(products.map(p => p.supplier))).map(name => ({
+            name,
+            phone: products.find(p => p.supplier === name)?.supplierPhone,
+            itemsCount: products.filter(p => p.supplier === name).length,
+          }));
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+              {supplierData.map(s => (
+                <div key={s.name} style={{ background: "#fff", borderRadius: 12, padding: 16, border: "1px solid #E8C9D1" }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8, color: BRAND.dark }}>{s.name}</div>
+                  <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
+                    <div>📞 <code style={{ fontFamily: "monospace", color: "#4A1625" }}>{s.phone}</code></div>
+                    <div style={{ marginTop: 8 }}>{s.itemsCount} item{s.itemsCount !== 1 ? "s" : ""} supplied</div>
+                  </div>
+                  <div style={{ background: "#F7E8EC", borderRadius: 8, padding: 8, marginTop: 12, fontSize: 12 }}>
+                    <div style={{ fontWeight: 600, color: BRAND.dark, marginBottom: 4 }}>Items from {s.name}:</div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>
+                      {products.filter(p => p.supplier === s.name).map(p => p.name).join(", ")}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* BACKUP */}
+        {view === "backup" && canAccess("backup") && (() => {
           const download = () => {
             const blob = new Blob([JSON.stringify({ app: "The Wardrobe Selection", exportedAt: new Date().toISOString(), version: 1, data: db }, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `TheWardrobeSelection-backup-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-            showToast("Backup downloaded", "success");
+            showToast("Backup downloaded.");
           };
           const onFile = (e) => {
-            const file = e.target.files?.[0]; if (!file) return; setFileError("");
+            const file = e.target.files?.[0]; if (!file) return; setFileError(null);
             const reader = new FileReader();
-            reader.onload = () => { try { const p = JSON.parse(reader.result); if (!p.data) { setFileError("Not a valid backup file."); return; } setConfirmRestore(p); } catch { setFileError("Could not read file."); } };
+            reader.onload = (evt) => {
+              try { const imported = JSON.parse(evt.target?.result); if (!imported.data) throw new Error("Invalid backup file."); setConfirmRestore(imported); } catch (e) { setFileError("Invalid backup file: " + e.message); }
+            };
             reader.readAsText(file); e.target.value = "";
           };
+          const stats2 = [["Products", db.products.length], ["Sales", db.sales.length]];
           return (
             <>
               <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 6, color: BRAND.dark }}>💾 Backup & Restore</div>
@@ -549,7 +711,7 @@ export default function App() {
                     <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Backup from <strong>{new Date(confirmRestore.exportedAt).toLocaleString()}</strong>. This replaces all current data and cannot be undone.</p>
                     <div style={{ display: "flex", gap: 10 }}>
                       <button onClick={() => setConfirmRestore(null)} style={{ flex: 1, background: "transparent", border: "1px solid #E8C9D1", borderRadius: 8, padding: "10px 0", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                      <button onClick={() => { setDb(confirmRestore.data); setConfirmRestore(null); showToast("Data restored", "success"); }} style={{ flex: 1, background: "#991b1b", color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer" }}>Yes, Restore</button>
+                      <button onClick={() => { setDb(confirmRestore.data); setConfirmRestore(null); showToast("Data restored", "ok"); }} style={{ flex: 1, background: "#991b1b", color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer" }}>Yes, Restore</button>
                     </div>
                   </div>
                 </div>
@@ -557,10 +719,38 @@ export default function App() {
             </>
           );
         })()}
+
+        {/* SETTINGS (ADMIN ONLY) */}
+        {view === "settings" && isAdmin && (() => {
+          return (
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 6, color: BRAND.dark }}>⚙️ Settings & Admin</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 14, marginTop: 16 }}>
+                <div style={{ background: "#fff", borderRadius: 12, padding: 18, border: "1px solid #E8C9D1" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12, color: BRAND.dark }}>👥 Manage Team</div>
+                  <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Add, edit, or deactivate employee access. Control which sections each team member can access.</p>
+                  <button onClick={() => setModal("userManagement")} style={{ width: "100%", background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                    👥 Manage Employees
+                  </button>
+                </div>
+
+                <div style={{ background: "#fff", borderRadius: 12, padding: 18, border: "1px solid #E8C9D1" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12, color: BRAND.dark }}>📊 System Info</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.8, marginBottom: 14 }}>
+                    <div>Active Employees: <strong>{users.filter(u => u.active && u.role !== "admin").length}</strong></div>
+                    <div>Total Users: <strong>{users.length}</strong></div>
+                    <div>License: <strong>{license.type === "trial" ? `Trial (${daysLeft(license.expiry)}d left)` : "Licensed"}</strong></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
 
       {/* ADD / EDIT */}
-      {(modal === "addProduct" || modal === "editProduct") && (
+      {(modal === "addProduct" || modal === "editProduct") && canAccess("inventory") && (
         <Modal title={modal === "addProduct" ? "Add Item" : "Edit Item"} onClose={close}>
           <Row label="Item Name"><input style={iStyle} type="text" value={form.name || ""} onChange={f("name")} /></Row>
           <Row label="Category">
@@ -599,7 +789,7 @@ export default function App() {
       )}
 
       {/* RECORD SALE */}
-      {modal === "recordSale" && (
+      {modal === "recordSale" && canAccess("sales") && (
         <Modal title="Record a Sale" onClose={close}>
           <Row label="Item">
             <select style={iStyle} value={form.productId || ""} onChange={e => { const p = products.find(x => x.id === e.target.value); setForm(prev => ({ ...prev, productId: e.target.value, sellPrice: p?.sellPrice || 0 })); }}>
@@ -618,7 +808,7 @@ export default function App() {
       )}
 
       {/* RESTOCK */}
-      {modal === "restock" && editing && (
+      {modal === "restock" && editing && canAccess("alerts") && (
         <Modal title={`Restock — ${editing.name}`} onClose={close}>
           <div style={{ background: "#F7E8EC", borderRadius: 8, padding: "9px 14px", marginBottom: 14, fontSize: 14, color: BRAND.dark }}>
             Current stock: <b>{editing.qty} pieces</b> · Size {editing.size} · {editing.color}
@@ -628,6 +818,11 @@ export default function App() {
           <Row label="Supplier Phone"><input style={iStyle} type="text" value={form.supplierPhone || ""} onChange={f("supplierPhone")} /></Row>
           <button onClick={restock} style={{ width: "100%", background: BRAND.color, color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, cursor: "pointer" }}>Confirm Restock</button>
         </Modal>
+      )}
+
+      {/* USER MANAGEMENT */}
+      {modal === "userManagement" && isAdmin && (
+        <UserManagementModal users={users} onClose={close} onSave={handleUserSave} />
       )}
     </div>
   );
